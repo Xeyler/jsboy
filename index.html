@@ -4,7 +4,24 @@
 		<script src="gb/gpu.js"></script>
 		<script src="gb/mmu.js"></script>
 	</head>
-	<body
-		<canvas id="myCanvas" width="160" height="044"</canvas>
+	<body>
+		<canvas id="display" width="160" height="144"></canvas>
 	</body>
+	<input id="rom_input" type="file">
+	<script>
+		rom_input.addEventListener('change', function() {
+				console.log("User selected rom file: ", rom_input.files);
+				var reader = new FileReader();
+				reader.onload = function() {
+					var file_byte_array = new Uint8Array(this.result);
+					mmu.set_rom(file_byte_array);
+					mmu.reset();
+					gpu.reset();
+					cpu.reset();
+					cpu.run();
+				}
+				reader.readAsArrayBuffer(rom_input.files[0]);
+			}
+		);
+	</script>
 </html>
