@@ -1,49 +1,73 @@
 cpu = {
-	_clock: {
-		m: 0,
-		t: 0
-	},
+	_cycles: 0,
 	
 	_r: {
-		a: 0,
-		b: 0,
-		c: 0,
-		d: 0,
-		e: 0,
-		h: 0,
-		l: 0,
+		a: 0, b: 0, c: 0, d: 0, e: 0, h: 0, l: 0,
+		set bc(val) {
+			this.b = (val >> 8) & 0xFF;
+			this.c = val & 0xFF;
+		},
+		get bc() {
+			return (this.b << 8) + this.c;
+		},
+		set de(val) {
+			this.d = (val >> 8) & 0xFF;
+			this.e = val & 0xFF;
+		},
+		get de() {
+			return (this.d << 8) + this.e;
+		},
+		set hl(val) {
+			this.h = (val >> 8) & 0xFF;
+			this.l = val & 0xFF;
+		},
+		get hl() {
+			return (this.h << 8) + this.l;
+		},
 		f: {
-			set Z(zVal) {
-				this.value = zVal ? (this.value |= 0b10000000) : (this.value &= 0b01111111);
+			value: 0,
+			set z(val) {
+				this.value = val ? (this.value |= 0b10000000) : (this.value &= 0b01111111);
 			},
-			get Z() {
+			get z() {
 				return (this.value & 0b10000000) >> 7;
 			},
-			set N(nVal) {
-				this.value = nVal ? (this.value |= 0b01000000) : (this.value &= 0b10111111);
+			set n(val) {
+				this.value = val ? (this.value |= 0b01000000) : (this.value &= 0b10111111);
 			},
-			get N() {
+			get n() {
 				return (this.value & 0b01000000) >> 6;
 			},
-			set H(hVal) {
-				this.value = hVal ? (this.value |= 0b00100000) : (this.value &= 0b11011111);
+			set h(val) {
+				this.value = val ? (this.value |= 0b00100000) : (this.value &= 0b11011111);
 			},
-			get H() {
+			get h() {
 				return (this.value & 0b00100000) >> 5;
 			},
-			set C(cVal) {
-				this.value = cVal ? (this.value |= 0b00010000) : (this.value &= 0b11101111);
+			set c(val) {
+				this.value = val ? (this.value |= 0b00010000) : (this.value &= 0b11101111);
 			},
-			get C() {
+			get c() {
 				return (this.value & 0b00010000) >> 4;
-			},
-			value: 0
+			}
 		},
-		pc: 0,
-		sp: 0,
+		_pc: 0,
+		_sp: 0,
+		set pc(val) {
+			this._pc = val & 0xFFFF;
+		},
+		get pc() {
+			return this._pc;
+		},
+		set sp(val) {
+			this._sp = val & 0xFFFF;
+		},
+		get sp() {
+			return this._sp;
+		},
 		m: 0,
 		t: 0,
-		ime: 0
+		ime: false,
 	},
 	
 	_halt: 0,
@@ -60,60 +84,58 @@ cpu = {
 		cpu._r.e = 0;
 		cpu._r.h = 0;
 		cpu._r.l = 0;
-		cpu._r.f = 0;
+		cpu._r.f.value = 0;
 		cpu._r.pc = 0;
 		cpu._r.sp = 0;
 		cpu._r.m = 0;
 		cpu._r.t = 0;
-		cpu._r.ime = 1;
+		cpu._r.ime = true;
 	},
 	
 	run: function() {
 		while(true) {
-			cpu._map[mmu.rb(cpu._r.pc++)]();
-			cpu._r.pc &= 0xFFFF;
-			cpu._clock.m += cpu._r.m;
-			cpu._clock.t += cpu._r.t;
+			var cyclesAdvanced = cpu._map[mmu.rb(cpu._r.pc++)]();
+			cpu._cycles += cyclesAdvanced;
 			
-			gpu.update();
+			gpu.advanceCycles(cyclesAdvanced);
 		}
 	},
 	
 	_ops: {
 		// Misc/control instructions
-		NOP: function() { cpu._r.m=1; cpu._r.t=4; },
+		NOP: function() { return 1; },
 		STOP: function() { throw new Error("opcode not implemented"); },
-		HALT: function() { cpu._halt=1; cpu._r.m=1; cpu._r.t=4; },
-		PREFIX: function() { cpu._r.pc&=0xFFFF; cpu._cbmap[mmu.rb(cpu._r.pc++)](); },
-		DI: function() { cpu._r.ime=0; cpu._r.m=1; cpu._r.t=4; },
-		EI: function() { cpu._r.ime=1; cpu._r.m=1; cpu._r.t=4; },
-		XX: function() { throw { error: new Error("CPU encountered undefined opcode: 0x" + mmu.rb(cpu._r.pc-1&0xFFFF).toString(16)), registers: cpu._r} },
+		HALT: function() { cpu._halt=1; return 1; },
+		PREFIX: function() { return cpu._cbmap[mmu.rb(cpu._r.pc++)](); },
+		DI: function() { cpu._r.ime=false; return 1; },
+		EI: function() { cpu._r.ime=true; return 1; },
+		XX: function() { throw { error: new Error("cpu encountered undefined opcode: 0x" + mmu.rb(cpu._r.pc-1&0xFFFF).toString(16)), registers: cpu._r} },
 		
 		// Jumps/calls
-		JR_NZ_r8: function() { var i=mmu.rb(cpu._r.sp++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.m=2; cpu._r.t=8; if(cpu._r.f.Z==0) { cpu._r.pc+=i; cpu._r.m=3; cpu._r.t=12 } },
-		JR_Z_r8: function() { var i=mmu.rb(cpu._r.sp++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.m=2; cpu._r.t=8; if(cpu._r.f.Z==1) { cpu._r.pc+=i; cpu._r.m=3; cpu._r.t=12 } },
-		JR_NC_r8: function() { var i=mmu.rb(cpu._r.sp++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.m=2; cpu._r.t=8; if(cpu._r.f.C==0) { cpu._r.pc+=i; cpu._r.m=3; cpu._r.t=12 } },
-		JR_C_r8: function() { var i=mmu.rb(cpu._r.sp++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.m=2; cpu._r.t=8; if(cpu._r.f.C==1) { cpu._r.pc+=i; cpu._r.m=3; cpu._r.t=12 } },
-		JR_r8: function() { var i=mmu.rb(cpu._r.sp++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.pc+=i; cpu._r.m=3; cpu._r.t=12; },
+		JR_NZ_r8: function() { var i=mmu.rb(cpu._r.pc++); if(i&0b10000000) i=-((~i+1)&0xFF); if(cpu._r.f.z==0) { cpu._r.pc+=i; return 3; } return 2; },
+		JR_Z_r8: function() {  var i=mmu.rb(cpu._r.pc++); if(i&0b10000000) i=-((~i+1)&0xFF); if(cpu._r.f.z==1) { cpu._r.pc+=i; return 3; } return 2; },
+		JR_NC_r8: function() { var i=mmu.rb(cpu._r.pc++); if(i&0b10000000) i=-((~i+1)&0xFF); if(cpu._r.f.c==0) { cpu._r.pc+=i; return 3; } return 2; },
+		JR_C_r8: function() { var i=mmu.rb(cpu._r.pc++); if(i&0b10000000) i=-((~i+1)&0xFF); if(cpu._r.f.c==1) { cpu._r.pc+=i; return 3; } return 2; },
+		JR_r8: function() { var i=mmu.rb(cpu._r.pc++); if(i&0b10000000) i=-((~i+1)&0xFF); cpu._r.pc+=i; return 3; },
 		
-		JP_NZ_a16: function() { throw new Error("opcode not implemented"); },
-		JP_Z_a16: function() { throw new Error("opcode not implemented"); },
-		JP_NC_a16: function() { throw new Error("opcode not implemented"); },
-		JP_C_a16: function() { throw new Error("opcode not implemented"); },
-		JP_a16: function() { throw new Error("opcode not implemented"); },
-		JP_HL: function() { throw new Error("opcode not implemented"); },
+		JP_NZ_a16: function() { if(cpu._r.f.z==0) { cpu._r.pc=mmu.rw(cpu._r.pc); return 4; } cpu._r.pc+=2; return 3; },
+		JP_Z_a16: function() { if(cpu._r.f.z==1) { cpu._r.pc=mmu.rw(cpu._r.pc); return 4; } cpu._r.pc+=2; return 3; },
+		JP_NC_a16: function() { if(cpu._r.f.c==0) { cpu._r.pc=mmu.rw(cpu._r.pc); return 4; } cpu._r.pc+=2; return 3; },
+		JP_C_a16: function() { if(cpu._r.f.z==1) { cpu._r.pc=mmu.rw(cpu._r.pc); return 4; } cpu._r.pc+=2; return 3; },
+		JP_a16: function() { cpu._r.pc=mmu.rw(cpu._r.pc); return 4; },
+		JP_HL: function() { cpu._r.pc=cpu._r.hl; return 1; },
 		
 		CALL_NZ_a16: function() { throw new Error("opcode not implemented"); },
 		CALL_Z_a16: function() { throw new Error("opcode not implemented"); },
 		CALL_NC_a16: function() { throw new Error("opcode not implemented"); },
 		CALL_C_a16: function() { throw new Error("opcode not implemented"); },
-		CALL_a16: function() { throw new Error("opcode not implemented"); },
+		CALL_a16: function() { var i=mmu.rw(cpu._r.pc); cpu._r.pc+=2; cpu._r.sp-=2; mmu.ww(cpu._r.sp, cpu._r.pc); cpu._r.pc=i; return 6; },
 		
 		RET_NZ: function() { throw new Error("opcode not implemented"); },
 		RET_Z: function() { throw new Error("opcode not implemented"); },
 		RET_NC: function() { throw new Error("opcode not implemented"); },
 		RET_C: function() { throw new Error("opcode not implemented"); },
-		RET: function() { throw new Error("opcode not implemented"); },
+		RET: function() { cpu._r.pc=mmu.rw(cpu._r.sp); cpu._r.sp+=2; return 4; },
 		RETI: function() { throw new Error("opcode not implemented"); },
 		
 		RST_00H: function() { throw new Error("opcode not implemented"); },
@@ -126,25 +148,25 @@ cpu = {
 		RST_38H: function() { throw new Error("opcode not implemented"); },
 		
 		// 8bit load/store/move instructions
-		LD_A_d8: function() { cpu._r.a=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_A_A: function() { throw new Error("opcode not implemented"); },
-		LD_A_B: function() { throw new Error("opcode not implemented"); },
-		LD_A_C: function() { throw new Error("opcode not implemented"); },
-		LD_A_D: function() { throw new Error("opcode not implemented"); },
-		LD_A_E: function() { throw new Error("opcode not implemented"); },
-		LD_A_H: function() { throw new Error("opcode not implemented"); },
-		LD_A_L: function() { throw new Error("opcode not implemented"); },
-		LD_A_vBC: function() { throw new Error("opcode not implemented"); },
-		LD_A_vDE: function() { throw new Error("opcode not implemented"); },
-		LD_A_vHL: function() { throw new Error("opcode not implemented"); },
-		LD_A_vHLinc: function() { cpu._r.a=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.l=(cpu._r.l+1)&0xFF; if(!cpu._r.l) cpu._r.h=(cpu._r.h+1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		LD_A_vHLdec: function() { cpu._r.a=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.l=(cpu._r.l-1)&0xFF; if(cpu._r.l==0xFF) cpu._r.h=(cpu._r.h-1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		LD_A_va16: function() { throw new Error("opcode not implemented"); },
-		LD_A_vC: function() { throw new Error("opcode not implemented"); },
-		LDH_A_va8: function() { throw new Error("opcode not implemented"); },
+		LD_A_d8: function() { cpu._r.a=mmu.rb(cpu._r.pc++); return 2; },
+		LD_A_A: function() { cpu._r.a=cpu._r.a; return 2; },
+		LD_A_B: function() { cpu._r.a=cpu._r.b; return 2; },
+		LD_A_C: function() { cpu._r.a=cpu._r.c; return 2; },
+		LD_A_D: function() { cpu._r.a=cpu._r.d; return 2; },
+		LD_A_E: function() { cpu._r.a=cpu._r.e; return 2; },
+		LD_A_H: function() { cpu._r.a=cpu._r.h; return 2; },
+		LD_A_L: function() { cpu._r.a=cpu._r.l; return 2; },
+		LD_A_vBC: function() { cpu._r.a=mmu.rb(cpu._r.bc); return 2; },
+		LD_A_vDE: function() { cpu._r.a=mmu.rb(cpu._r.de); return 2; },
+		LD_A_vHL: function() { cpu._r.a=mmu.rb(cpu._r.hl); return 2; },
+		LD_A_vHLinc: function() { cpu._r.a=mmu.rb(cpu._r.hl++); return 2; },
+		LD_A_vHLdec: function() { cpu._r.a=mmu.rb(cpu._r.hl--); return 2; },
+		LD_A_va16: function() { cpu._r.a=mmu.rb(mmu.rw(cpu._r.pc)); cpu._r.pc+=2; return 4; },
+		LD_A_vC: function() { cpu._r.a=mmu.rb(0xFF00+cpu._r.c); return 2; },
+		LDH_A_va8: function() { cpu._r.a=mmu.rb(0xFF00+mmu.rb(cpu._r.pc++)); return 3; },
 		
-		LD_B_d8: function() { cpu._r.b=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_B_A: function() { throw new Error("opcode not implemented"); },
+		LD_B_d8: function() { cpu._r.b=mmu.rb(cpu._r.pc++); return 2; },
+		LD_B_A: function() { cpu._r.b=cpu._r.a; return 1; },
 		LD_B_B: function() { throw new Error("opcode not implemented"); },
 		LD_B_C: function() { throw new Error("opcode not implemented"); },
 		LD_B_D: function() { throw new Error("opcode not implemented"); },
@@ -153,18 +175,18 @@ cpu = {
 		LD_B_L: function() { throw new Error("opcode not implemented"); },
 		LD_B_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_C_d8: function() { cpu._r.c=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_C_A: function() { throw new Error("opcode not implemented"); },
-		LD_C_B: function() { throw new Error("opcode not implemented"); },
-		LD_C_C: function() { throw new Error("opcode not implemented"); },
-		LD_C_D: function() { throw new Error("opcode not implemented"); },
-		LD_C_E: function() { throw new Error("opcode not implemented"); },
-		LD_C_H: function() { throw new Error("opcode not implemented"); },
-		LD_C_L: function() { throw new Error("opcode not implemented"); },
+		LD_C_d8: function() { cpu._r.c=mmu.rb(cpu._r.pc++); return 2; },
+		LD_C_A: function() { cpu._r.c=cpu._r.a; return 1; },
+		LD_C_B: function() { cpu._r.c=cpu._r.b; return 1; },
+		LD_C_D: function() { cpu._r.c=cpu._r.c; return 1; },
+		LD_C_C: function() { cpu._r.c=cpu._r.d; return 1; },
+		LD_C_E: function() { cpu._r.c=cpu._r.e; return 1; },
+		LD_C_H: function() { cpu._r.c=cpu._r.h; return 1; },
+		LD_C_L: function() { cpu._r.c=cpu._r.l; return 1; },
 		LD_C_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_D_d8: function() { cpu._r.d=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_D_A: function() { throw new Error("opcode not implemented"); },
+		LD_D_d8: function() { cpu._r.d=mmu.rb(cpu._r.pc++); return 2; },
+		LD_D_A: function() { cpu._r.d=cpu._r.a; return 1; },
 		LD_D_B: function() { throw new Error("opcode not implemented"); },
 		LD_D_C: function() { throw new Error("opcode not implemented"); },
 		LD_D_D: function() { throw new Error("opcode not implemented"); },
@@ -173,8 +195,8 @@ cpu = {
 		LD_D_L: function() { throw new Error("opcode not implemented"); },
 		LD_D_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_E_d8: function() { cpu._r.e=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_E_A: function() { throw new Error("opcode not implemented"); },
+		LD_E_d8: function() { cpu._r.e=mmu.rb(cpu._r.pc++); return 2; },
+		LD_E_A: function() { cpu._r.e=cpu._r.a; return 1; },
 		LD_E_B: function() { throw new Error("opcode not implemented"); },
 		LD_E_C: function() { throw new Error("opcode not implemented"); },
 		LD_E_D: function() { throw new Error("opcode not implemented"); },
@@ -183,8 +205,8 @@ cpu = {
 		LD_E_L: function() { throw new Error("opcode not implemented"); },
 		LD_E_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_H_d8: function() { cpu._r.h=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_H_A: function() { throw new Error("opcode not implemented"); },
+		LD_H_d8: function() { cpu._r.h=mmu.rb(cpu._r.pc++); return 2; },
+		LD_H_A: function() { cpu._r.h=cpu._r.a; return 1; },
 		LD_H_B: function() { throw new Error("opcode not implemented"); },
 		LD_H_C: function() { throw new Error("opcode not implemented"); },
 		LD_H_D: function() { throw new Error("opcode not implemented"); },
@@ -193,8 +215,8 @@ cpu = {
 		LD_H_L: function() { throw new Error("opcode not implemented"); },
 		LD_H_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_L_d8: function() { cpu._r.l=mmu.rb(cpu._r.sp++); cpu._r.m=2; cpu._r.t=8; },
-		LD_L_A: function() { throw new Error("opcode not implemented"); },
+		LD_L_d8: function() { cpu._r.l=mmu.rb(cpu._r.pc++); return 2; },
+		LD_L_A: function() { cpu._r.l=cpu._r.a; return 1; },
 		LD_L_B: function() { throw new Error("opcode not implemented"); },
 		LD_L_C: function() { throw new Error("opcode not implemented"); },
 		LD_L_D: function() { throw new Error("opcode not implemented"); },
@@ -203,159 +225,159 @@ cpu = {
 		LD_L_L: function() { throw new Error("opcode not implemented"); },
 		LD_L_vHL: function() { throw new Error("opcode not implemented"); },
 		
-		LD_vHL_d8: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_A: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_B: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_C: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_D: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_E: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_H: function() { throw new Error("opcode not implemented"); },
-		LD_vHL_L: function() { throw new Error("opcode not implemented"); },
-		LD_vHLinc_A: function() { mmu.wb((cpu._r.h<<8)+cpu._r.l,cpu._r.a); cpu._r.l=(cpu._r.l+1)&0xFF; if(!cpu._r.l) cpu._r.h=(cpu._r.h+1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		LD_vHLdec_A: function() { mmu.wb((cpu._r.h<<8)+cpu._r.l,cpu._r.a); cpu._r.l=(cpu._r.l-1)&0xFF; if(cpu._r.l==0xFF) cpu._r.h=(cpu._r.h-1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
+		LD_vHL_d8: function() { mmu.wb(cpu._r.hl,mmu.rb(pc++)); return 3; cpu._r.t=12;},
+		LD_vHL_A: function() { mmu.wb(cpu._r.hl,cpu._r.a); return 2; },
+		LD_vHL_B: function() { mmu.wb(cpu._r.hl,cpu._r.b); return 2; },
+		LD_vHL_C: function() { mmu.wb(cpu._r.hl,cpu._r.c); return 2; },
+		LD_vHL_D: function() { mmu.wb(cpu._r.hl,cpu._r.d); return 2; },
+		LD_vHL_E: function() { mmu.wb(cpu._r.hl,cpu._r.e); return 2; },
+		LD_vHL_H: function() { mmu.wb(cpu._r.hl,cpu._r.h); return 2; },
+		LD_vHL_L: function() { mmu.wb(cpu._r.hl,cpu._r.l); return 2; },
+		LD_vHLinc_A: function() { mmu.wb(cpu._r.hl++,cpu._r.a); return 2; },
+		LD_vHLdec_A: function() { mmu.wb(cpu._r.hl--,cpu._r.a); return 2; },
 		
 		LD_vBC_A: function() { throw new Error("opcode not implemented"); },
 		
 		LD_vDE_A: function() { throw new Error("opcode not implemented"); },
 		
-		LD_vC_A: function() { throw new Error("opcode not implemented"); },
+		LD_vC_A: function() { mmu.wb(0xFF00+cpu._r.c,cpu._r.a); return 2; },
 		
-		LD_va16_A: function() { throw new Error("opcode not implemented"); },
-		LDH_va8_A: function() { throw new Error("opcode not implemented"); },
+		LD_va16_A: function() { mmu.wb(mmu.rw(cpu._r.pc),cpu._r.a); cpu._r.pc+=2; return 4; },
+		LDH_va8_A: function() { mmu.wb(0xFF00+mmu.rb(cpu._r.pc++),cpu._r.a); return 3; },
 		
 		// 16bit load/store/move instructions
-		PUSH_BC: function() { throw new Error("opcode not implemented"); },
-		PUSH_DE: function() { throw new Error("opcode not implemented"); },
-		PUSH_HL: function() { throw new Error("opcode not implemented"); },
+		PUSH_BC: function() { cpu._r.sp-=2; mmu.ww(cpu._r.sp, cpu._r.bc); return 3; },
+		PUSH_DE: function() { cpu._r.sp-=2; mmu.ww(cpu._r.sp, cpu._r.de); return 3; },
+		PUSH_HL: function() { cpu._r.sp-=2; mmu.ww(cpu._r.sp, cpu._r.hl); return 3; },
 		PUSH_AF: function() { throw new Error("opcode not implemented"); },
-		POP_BC: function() { throw new Error("opcode not implemented"); },
-		POP_DE: function() { throw new Error("opcode not implemented"); },
-		POP_HL: function() { throw new Error("opcode not implemented"); },
+		POP_BC: function() { cpu._r.bc=mmu.rw(cpu._r.sp); cpu._r.sp+=2; return 3; },
+		POP_DE: function() { cpu._r.de=mmu.rw(cpu._r.sp); cpu._r.sp+=2; return 3; },
+		POP_HL: function() { cpu._r.hl=mmu.rw(cpu._r.sp); cpu._r.sp+=2; return 3; },
 		POP_AF: function() { throw new Error("opcode not implemented"); },
 		
-		LD_BC_d16: function() { throw new Error("opcode not implemented"); },
-		LD_DE_d16: function() { throw new Error("opcode not implemented"); },
-		LD_HL_d16: function() { cpu._r.l=mmu.rb(cpu._r.pc++); cpu._r.h=mmu.rb(cpu._r.pc++); cpu._r.m=3; cpu._r.t=12; },
-		LD_SP_d16: function() { cpu._r.sp=mmu.rw(cpu._r.pc); cpu._r.pc+=2; cpu._r.m=3; cpu._r.t=12; },
+		LD_BC_d16: function() { cpu._r.c=mmu.rb(cpu._r.pc++); cpu._r.b=mmu.rb(cpu._r.pc++); return 3; },
+		LD_DE_d16: function() { cpu._r.e=mmu.rb(cpu._r.pc++); cpu._r.d=mmu.rb(cpu._r.pc++); return 3; },
+		LD_HL_d16: function() { cpu._r.l=mmu.rb(cpu._r.pc++); cpu._r.h=mmu.rb(cpu._r.pc++); return 3; },
+		LD_SP_d16: function() { cpu._r.sp=mmu.rw(cpu._r.pc); cpu._r.pc+=2; return 3; },
 		
 		LD_va16_SP: function() { throw new Error("opcode not implemented"); },
 		LD_HL_SPr8: function() { throw new Error("opcode not implemented"); },
 		LD_SP_HL: function() { throw new Error("opcode not implemented"); },
 		
 		// 8bit arithmetic/logical instructions
-		INC_A: function() { cpu._r.a=(cpu._r.a+1)&0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.m=1; cpu._r.t=4; },
-		INC_B: function() { throw new Error("opcode not implemented"); },
-		INC_C: function() { throw new Error("opcode not implemented"); },
-		INC_D: function() { throw new Error("opcode not implemented"); },
-		INC_E: function() { throw new Error("opcode not implemented"); },
-		INC_H: function() { throw new Error("opcode not implemented"); },
-		INC_L: function() { throw new Error("opcode not implemented"); },
-		INC_vHL: function() { throw new Error("opcode not implemented"); },
+		INC_A: function() { cpu._r.a=(cpu._r.a+1)&0xFF; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); return 1; },
+		INC_B: function() { cpu._r.b=(cpu._r.b+1)&0xFF; cpu._r.f.z=(cpu._r.b==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.b>0x0F); return 1; },
+		INC_C: function() { cpu._r.c=(cpu._r.c+1)&0xFF; cpu._r.f.z=(cpu._r.c==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.c>0x0F); return 1; },
+		INC_D: function() { cpu._r.d=(cpu._r.d+1)&0xFF; cpu._r.f.z=(cpu._r.d==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.d>0x0F); return 1; },
+		INC_E: function() { cpu._r.e=(cpu._r.e+1)&0xFF; cpu._r.f.z=(cpu._r.e==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.e>0x0F); return 1; },
+		INC_H: function() { cpu._r.h=(cpu._r.h+1)&0xFF; cpu._r.f.z=(cpu._r.h==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.h>0x0F); return 1; },
+		INC_L: function() { cpu._r.l=(cpu._r.l+1)&0xFF; cpu._r.f.z=(cpu._r.l==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.l>0x0F); return 1; },
+		INC_vHL: function() { mmu.wb(cpu._r.hl,(mmu.rb(cpu._r.hl)+1)&0xFF); cpu._r.f.z=(mmu.rb(cpu._r.hl)==0); cpu._r.f.n=0; cpu._r.f.h=(mmu.rb(cpu._r.hl)>0x0F); return 3; },
 		
-		DEC_A: function() { throw new Error("opcode not implemented"); },
-		DEC_B: function() { throw new Error("opcode not implemented"); },
-		DEC_C: function() { throw new Error("opcode not implemented"); },
-		DEC_D: function() { throw new Error("opcode not implemented"); },
-		DEC_E: function() { throw new Error("opcode not implemented"); },
-		DEC_H: function() { throw new Error("opcode not implemented"); },
-		DEC_L: function() { throw new Error("opcode not implemented"); },
-		DEC_vHL: function() { throw new Error("opcode not implemented"); },
+		DEC_A: function() { cpu._r.a=(cpu._r.a-1)&0xFF; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>=0x0F); return 1; },
+		DEC_B: function() { cpu._r.b=(cpu._r.b-1)&0xFF; cpu._r.f.z=(cpu._r.b==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.b>=0x0F); return 1; },
+		DEC_C: function() { cpu._r.c=(cpu._r.c-1)&0xFF; cpu._r.f.z=(cpu._r.c==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.c>=0x0F); return 1; },
+		DEC_D: function() { cpu._r.d=(cpu._r.d-1)&0xFF; cpu._r.f.z=(cpu._r.d==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.d>=0x0F); return 1; },
+		DEC_E: function() { cpu._r.e=(cpu._r.e-1)&0xFF; cpu._r.f.z=(cpu._r.e==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.e>=0x0F); return 1; },
+		DEC_H: function() { cpu._r.h=(cpu._r.h-1)&0xFF; cpu._r.f.z=(cpu._r.h==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.h>=0x0F); return 1; },
+		DEC_L: function() { cpu._r.l=(cpu._r.l-1)&0xFF; cpu._r.f.z=(cpu._r.l==0); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.l>=0x0F); return 1; },
+		DEC_vHL: function() { mmu.wb(cpu._r.hl,(mmu.rb(cpu._r.hl)-1)&0xFF); cpu._r.f.z=(mmu.rb(cpu._r.hl)==0); cpu._r.f.n=0; cpu._r.f.h=(mmu.rb(cpu._r.hl)>=0x0F); return 3; },
 		
-		ADD_A_A: function() { cpu._r.a+=cpu._r.a; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_B: function() { cpu._r.a+=cpu._r.b; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_C: function() { cpu._r.a+=cpu._r.c; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_D: function() { cpu._r.a+=cpu._r.d; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_E: function() { cpu._r.a+=cpu._r.e; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_H: function() { cpu._r.a+=cpu._r.h; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_L: function() { cpu._r.a+=cpu._r.l; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADD_A_vHL: function() { cpu._r.a+=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
-		ADD_A_d8: function() { cpu._r.a+=mmu.rb(cpu._r.pc++); cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
+		ADD_A_A: function() { cpu._r.a+=cpu._r.a; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_B: function() { cpu._r.a+=cpu._r.b; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_C: function() { cpu._r.a+=cpu._r.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_D: function() { cpu._r.a+=cpu._r.d; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_E: function() { cpu._r.a+=cpu._r.e; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_H: function() { cpu._r.a+=cpu._r.h; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_L: function() { cpu._r.a+=cpu._r.l; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADD_A_vHL: function() { cpu._r.a+=mmu.rb(cpu._r.hl); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
+		ADD_A_d8: function() { cpu._r.a+=mmu.rb(cpu._r.pc++); cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
 		
-		ADC_A_A: function() { cpu._r.a+=cpu._r.a; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_B: function() { cpu._r.a+=cpu._r.b; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_C: function() { cpu._r.a+=cpu._r.c; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_D: function() { cpu._r.a+=cpu._r.d; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_E: function() { cpu._r.a+=cpu._r.e; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_H: function() { cpu._r.a+=cpu._r.h; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_L: function() { cpu._r.a+=cpu._r.l; cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		ADC_A_vHL: function() { cpu._r.a+=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
-		ADC_A_d8: function() { cpu._r.a+=mmu.rb(cpu._r.pc++); cpu._r.f.C=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.C; cpu._r.f.N=0; cpu._r.f.H=(cpu._r.a>0x0F); cpu._r.a&+0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
+		ADC_A_A: function() { cpu._r.a+=cpu._r.a; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_B: function() { cpu._r.a+=cpu._r.b; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_C: function() { cpu._r.a+=cpu._r.c; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_D: function() { cpu._r.a+=cpu._r.d; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_E: function() { cpu._r.a+=cpu._r.e; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_H: function() { cpu._r.a+=cpu._r.h; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_L: function() { cpu._r.a+=cpu._r.l; cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		ADC_A_vHL: function() { cpu._r.a+=mmu.rb(cpu._r.hl); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
+		ADC_A_d8: function() { cpu._r.a+=mmu.rb(cpu._r.pc++); cpu._r.f.c=(cpu._r.a>0xFF); cpu._r.a+=cpu._r.f.c; cpu._r.f.n=0; cpu._r.f.h=(cpu._r.a>0x0F); cpu._r.a&+0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
 		
-		SUB_A_A: function() { cpu._r.a-=cpu._r.a; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_B: function() { cpu._r.a-=cpu._r.b; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_C: function() { cpu._r.a-=cpu._r.c; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_D: function() { cpu._r.a-=cpu._r.d; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_E: function() { cpu._r.a-=cpu._r.e; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_H: function() { cpu._r.a-=cpu._r.h; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_L: function() { cpu._r.a-=cpu._r.l; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SUB_A_vHL: function() { cpu._r.a-=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
-		SUB_A_d8: function() { cpu._r.a-=mmu.rb(cpu._r.pc++); cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
+		SUB_A_A: function() { cpu._r.a-=cpu._r.a; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_B: function() { cpu._r.a-=cpu._r.b; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_C: function() { cpu._r.a-=cpu._r.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_D: function() { cpu._r.a-=cpu._r.d; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_E: function() { cpu._r.a-=cpu._r.e; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_H: function() { cpu._r.a-=cpu._r.h; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_L: function() { cpu._r.a-=cpu._r.l; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SUB_A_vHL: function() { cpu._r.a-=mmu.rb(cpu._r.hl); cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
+		SUB_A_d8: function() { cpu._r.a-=mmu.rb(cpu._r.pc++); cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
 		
-		SBC_A_A: function() { cpu._r.a-=cpu._r.a; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_B: function() { cpu._r.a-=cpu._r.b; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_C: function() { cpu._r.a-=cpu._r.c; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_D: function() { cpu._r.a-=cpu._r.d; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_E: function() { cpu._r.a-=cpu._r.e; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_H: function() { cpu._r.a-=cpu._r.h; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_L: function() { cpu._r.a-=cpu._r.l; cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=1; cpu._r.t=4; },
-		SBC_A_vHL: function() { cpu._r.a-=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
-		SBC_A_d8: function() { cpu._r.a-=mmu.rb(cpu._r.pc++); cpu._r.f.C=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.C; cpu._r.f.N=1; cpu._r.f.H=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.Z=(cpu._r.a==0); cpu._r.m=2; cpu._r.t=8; },
+		SBC_A_A: function() { cpu._r.a-=cpu._r.a; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_B: function() { cpu._r.a-=cpu._r.b; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_C: function() { cpu._r.a-=cpu._r.c; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_D: function() { cpu._r.a-=cpu._r.d; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_E: function() { cpu._r.a-=cpu._r.e; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_H: function() { cpu._r.a-=cpu._r.h; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_L: function() { cpu._r.a-=cpu._r.l; cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 1; },
+		SBC_A_vHL: function() { cpu._r.a-=mmu.rb(cpu._r.hl); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
+		SBC_A_d8: function() { cpu._r.a-=mmu.rb(cpu._r.pc++); cpu._r.f.c=(cpu._r.a<0x00); cpu._r.a-=cpu._r.f.c; cpu._r.f.n=1; cpu._r.f.h=(cpu._r.a<0x10); cpu._r.a&=0xFF; cpu._r.f.z=(cpu._r.a==0); return 2; },
 		
-		OR_A_A: function() { cpu._r.a|=cpu._r.a; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_B: function() { cpu._r.a|=cpu._r.b; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_C: function() { cpu._r.a|=cpu._r.c; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_D: function() { cpu._r.a|=cpu._r.d; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_E: function() { cpu._r.a|=cpu._r.e; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_H: function() { cpu._r.a|=cpu._r.h; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_L: function() { cpu._r.a|=cpu._r.l; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		OR_A_vHL: function() { cpu._r.a|=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=2; cpu._r.t=8; },
-		OR_A_d8: function() { cpu._r.a|=mmu.rb(cpu._r.pc++); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=2; cpu._r.t=8; },
+		OR_A_A: function() { cpu._r.a|=cpu._r.a; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_B: function() { cpu._r.a|=cpu._r.b; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_C: function() { cpu._r.a|=cpu._r.c; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_D: function() { cpu._r.a|=cpu._r.d; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_E: function() { cpu._r.a|=cpu._r.e; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_H: function() { cpu._r.a|=cpu._r.h; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_L: function() { cpu._r.a|=cpu._r.l; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		OR_A_vHL: function() { cpu._r.a|=mmu.rb(cpu._r.hl); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 2; },
+		OR_A_d8: function() { cpu._r.a|=mmu.rb(cpu._r.pc++); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 2; },
 		
-		XOR_A_A: function() { cpu._r.a^cpu._r.a; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_B: function() { cpu._r.a^cpu._r.b; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_C: function() { cpu._r.a^cpu._r.c; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_D: function() { cpu._r.a^cpu._r.d; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_E: function() { cpu._r.a^cpu._r.e; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_H: function() { cpu._r.a^cpu._r.h; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_L: function() { cpu._r.a^cpu._r.l; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		XOR_A_vHL: function() { cpu._r.a^mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=2; cpu._r.t=8; },
-		XOR_A_d8: function() { cpu._r.a^mmu.rb(cpu._r.pc++); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=0; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
+		XOR_A_A: function() { cpu._r.a^cpu._r.a; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_B: function() { cpu._r.a^cpu._r.b; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_C: function() { cpu._r.a^cpu._r.c; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_D: function() { cpu._r.a^cpu._r.d; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_E: function() { cpu._r.a^cpu._r.e; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_H: function() { cpu._r.a^cpu._r.h; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_L: function() { cpu._r.a^cpu._r.l; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
+		XOR_A_vHL: function() { cpu._r.a^mmu.rb(cpu._r.hl); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 2; },
+		XOR_A_d8: function() { cpu._r.a^mmu.rb(cpu._r.pc++); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=0; return 1; },
 		
-		AND_A_A: function() { cpu._r.a&=cpu._r.a; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_B: function() { cpu._r.a&=cpu._r.b; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_C: function() { cpu._r.a&=cpu._r.c; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_D: function() { cpu._r.a&=cpu._r.d; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_E: function() { cpu._r.a&=cpu._r.e; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_H: function() { cpu._r.a&=cpu._r.h; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_L: function() { cpu._r.a&=cpu._r.l; cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=1; cpu._r.t=4; },
-		AND_A_vHL: function() { cpu._r.a&=mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=2; cpu._r.t=8; },
-		AND_A_d8: function() { cpu._r.a&=mmu.rb(cpu._r.pc++); cpu._r.f.Z=(cpu._r.a==0); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.f.C=0; cpu._r.m=2; cpu._r.t=8; },
+		AND_A_A: function() { cpu._r.a&=cpu._r.a; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_B: function() { cpu._r.a&=cpu._r.b; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_C: function() { cpu._r.a&=cpu._r.c; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_D: function() { cpu._r.a&=cpu._r.d; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_E: function() { cpu._r.a&=cpu._r.e; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_H: function() { cpu._r.a&=cpu._r.h; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_L: function() { cpu._r.a&=cpu._r.l; cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 1; },
+		AND_A_vHL: function() { cpu._r.a&=mmu.rb(cpu._r.hl); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 2; },
+		AND_A_d8: function() { cpu._r.a&=mmu.rb(cpu._r.pc++); cpu._r.f.z=(cpu._r.a==0); cpu._r.f.n=0; cpu._r.f.h=1; cpu._r.f.c=0; return 2; },
 		
-		CP_A_A: function() { var result=cpu._r.a-cpu._r.a; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_B: function() { var result=cpu._r.a-cpu._r.b; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_C: function() { var result=cpu._r.a-cpu._r.c; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_D: function() { var result=cpu._r.a-cpu._r.d; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_E: function() { var result=cpu._r.a-cpu._r.e; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_H: function() { var result=cpu._r.a-cpu._r.h; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_L: function() { var result=cpu._r.a-cpu._r.l; cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=1; cpu._r.t=4; },
-		CP_A_vHL: function() { var result=cpu._r.a-mmu.rb((cpu._r.h<<8)+cpu._r.l); cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=2; cpu._r.t=8; },
-		CP_A_d8: function() { var result=cpu._r.a-mmu.rb(cpu._r.pc++); cpu._r.f.N=1; cpu._r.f.Z=(result==0); cpu._r.f.H=(result<0x10); cpu._r.f.C=(result<0x00); cpu._r.m=2; cpu._r.t=8; },
+		CP_A_A: function() { var result=cpu._r.a-cpu._r.a; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_B: function() { var result=cpu._r.a-cpu._r.b; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_C: function() { var result=cpu._r.a-cpu._r.c; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_D: function() { var result=cpu._r.a-cpu._r.d; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_E: function() { var result=cpu._r.a-cpu._r.e; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_H: function() { var result=cpu._r.a-cpu._r.h; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_L: function() { var result=cpu._r.a-cpu._r.l; cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 1; },
+		CP_A_vHL: function() { var result=cpu._r.a-mmu.rb(cpu._r.hl); cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 2; },
+		CP_A_d8: function() { var result=cpu._r.a-mmu.rb(cpu._r.pc++); cpu._r.f.n=1; cpu._r.f.z=(result==0); cpu._r.f.h=(result<0x10); cpu._r.f.c=(result<0x00); return 2; },
 		
-		CPL: function() { cpu._r.a=~cpu._r.a; cpu._r.f.N=1; cpu._r.f.H=1; cpu._r.m=1; cpu._r.t=4; },
+		CPL: function() { cpu._r.a=~cpu._r.a; cpu._r.f.n=1; cpu._r.f.h=1; return 1; },
 		DAA: function() { throw new Error("opcode not implemented"); },
-		CCF: function() { cpu._r.f.N=false; cpu._r.f.H=false; cpu._r.f.C=~cpu._r.f.C; cpu._r.m=1; cpu._r.t=4; },
-		SCF: function() { cpu._r.f.H=false; cpu._r.f.N=false; cpu._r.f.C=true; cpu._r.m=1; cpu._r.t=4; },
+		CCF: function() { cpu._r.f.n=false; cpu._r.f.h=false; cpu._r.f.c=~cpu._r.f.c; return 1; },
+		SCF: function() { cpu._r.f.h=false; cpu._r.f.n=false; cpu._r.f.c=true; return 1; },
 		
 		// 16bit arithmetic/logical instructions
-		INC_BC: function() { cpu._r.c=(cpu._r.c+1)&0xFF; if(cpu._r.c==0) cpu._r.b=(cpu._r.b+1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		INC_DE: function() { cpu._r.e=(cpu._r.e+1)&0xFF; if(cpu._r.e==0) cpu._r.d=(cpu._r.d+1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		INC_HL: function() { cpu._r.l=(cpu._r.l+1)&0xFF; if(cpu._r.l==0) cpu._r.h=(cpu._r.h+1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		INC_SP: function() { cpu._r.sp=(cpu._r.sp+1)&0xFFFF; cpu._r.m=2; cpu._r.t=8; },
+		INC_BC: function() { cpu._r.c=(cpu._r.c+1)&0xFF; if(cpu._r.c==0) cpu._r.b=(cpu._r.b+1)&0xFF; return 2; },
+		INC_DE: function() { cpu._r.e=(cpu._r.e+1)&0xFF; if(cpu._r.e==0) cpu._r.d=(cpu._r.d+1)&0xFF; return 2; },
+		INC_HL: function() { cpu._r.l=(cpu._r.l+1)&0xFF; if(cpu._r.l==0) cpu._r.h=(cpu._r.h+1)&0xFF; return 2; },
+		INC_SP: function() { cpu._r.sp=(cpu._r.sp+1); return 2; },
 		
-		DEC_BC: function() { cpu._r.c=(cpu._r.c-1)&0xFF; if(cpu._r.c==0xFF) cpu._r.b=(cpu._r.b-1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		DEC_DE: function() { cpu._r.e=(cpu._r.e-1)&0xFF; if(cpu._r.e==0xFF) cpu._r.d=(cpu._r.d-1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		DEC_HL: function() { cpu._r.l=(cpu._r.l-1)&0xFF; if(cpu._r.l==0xFF) cpu._r.h=(cpu._r.h-1)&0xFF; cpu._r.m=2; cpu._r.t=8; },
-		DEC_SP: function() { cpu._r.sp=(cpu._r.sp-1)&0xFFFF; cpu._r.m=2; cpu._r.t=8; },
+		DEC_BC: function() { cpu._r.c=(cpu._r.c-1)&0xFF; if(cpu._r.c==0xFF) cpu._r.b=(cpu._r.b-1)&0xFF; return 2; },
+		DEC_DE: function() { cpu._r.e=(cpu._r.e-1)&0xFF; if(cpu._r.e==0xFF) cpu._r.d=(cpu._r.d-1)&0xFF; return 2; },
+		DEC_HL: function() { cpu._r.l=(cpu._r.l-1)&0xFF; if(cpu._r.l==0xFF) cpu._r.h=(cpu._r.h-1)&0xFF; return 2; },
+		DEC_SP: function() { cpu._r.sp=(cpu._r.sp-1); return 2; },
 		
 		ADD_HL_BC: function() { throw new Error("opcode not implemented"); },
 		ADD_HL_DE: function() { throw new Error("opcode not implemented"); },
@@ -366,7 +388,7 @@ cpu = {
 		
 		// 8bit rotations/shifts and bit instructions
 		RLCA: function() { throw new Error("opcode not implemented"); },
-		RLA: function() { throw new Error("opcode not implemented"); },
+		RLA: function() { var i=cpu._r.a&0b10000000; cpu._r.a=((cpu._r.a<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 1; },
 		RRCA: function() { throw new Error("opcode not implemented"); },
 		RRA: function() { throw new Error("opcode not implemented"); },
 	},
@@ -390,14 +412,14 @@ cpu = {
 		RRC_vHL: function() { throw new Error("opcode not implemented"); },
 		RRC_A: function() { throw new Error("opcode not implemented"); },
 		
-		RL_B: function() { throw new Error("opcode not implemented"); },
-		RL_C: function() { throw new Error("opcode not implemented"); },
-		RL_D: function() { throw new Error("opcode not implemented"); },
-		RL_E: function() { throw new Error("opcode not implemented"); },
-		RL_H: function() { throw new Error("opcode not implemented"); },
-		RL_L: function() { throw new Error("opcode not implemented"); },
+		RL_B: function() { var i=cpu._r.b&0b10000000; cpu._r.b=((cpu._r.b<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.b==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
+		RL_C: function() { var i=cpu._r.c&0b10000000; cpu._r.c=((cpu._r.c<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.c==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
+		RL_D: function() { var i=cpu._r.d&0b10000000; cpu._r.d=((cpu._r.d<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.d==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
+		RL_H: function() { var i=cpu._r.h&0b10000000; cpu._r.h=((cpu._r.h<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.h==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
+		RL_E: function() { var i=cpu._r.e&0b10000000; cpu._r.e=((cpu._r.e<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.e==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
+		RL_L: function() { var i=cpu._r.l&0b10000000; cpu._r.l=((cpu._r.l<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.l==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
 		RL_vHL: function() { throw new Error("opcode not implemented"); },
-		RL_A: function() { throw new Error("opcode not implemented"); },
+		RL_A: function() { var i=cpu._r.a&0b10000000; cpu._r.a=((cpu._r.a<<1)|cpu._r.f.c)&0xFF; cpu._r.f.z=cpu._r.a==0; cpu._r.f.n=0; cpu._r.f.h=0; cpu._r.f.c=i; return 2; },
 		
 		RR_B: function() { throw new Error("opcode not implemented"); },
 		RR_C: function() { throw new Error("opcode not implemented"); },
@@ -507,14 +529,14 @@ cpu = {
 		BIT_6_vHL: function() { throw new Error("opcode not implemented"); },
 		BIT_6_A: function() { throw new Error("opcode not implemented"); },
 		
-		BIT_7_B: function() { cpu._r.f.Z=!(cpu._r.b&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_C: function() { cpu._r.f.Z=!(cpu._r.c&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_D: function() { cpu._r.f.Z=!(cpu._r.d&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_E: function() { cpu._r.f.Z=!(cpu._r.e&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_H: function() { cpu._r.f.Z=!(cpu._r.h&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_L: function() { cpu._r.f.Z=!(cpu._r.l&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_vHL: function() { cpu._r.f.Z=!(mmu.rb((cpu._r.h<<8)+cpu._r.l)&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
-		BIT_7_A: function() { cpu._r.f.Z=!(cpu._r.a&0b10000000); cpu._r.f.N=0; cpu._r.f.H=1; cpu._r.m=2; cpu._r.t=8; },
+		BIT_7_B: function() { cpu._r.f.z=!(cpu._r.b&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_C: function() { cpu._r.f.z=!(cpu._r.c&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_D: function() { cpu._r.f.z=!(cpu._r.d&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_E: function() { cpu._r.f.z=!(cpu._r.e&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_H: function() { cpu._r.f.z=!(cpu._r.h&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_L: function() { cpu._r.f.z=!(cpu._r.l&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_vHL: function() { cpu._r.f.z=!(mmu.rb(cpu._r.hl)&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
+		BIT_7_A: function() { cpu._r.f.z=!(cpu._r.a&0b10000000); cpu._r.f.n=0; cpu._r.f.h=1; return 2; },
 		
 		RES_0_B: function() { throw new Error("opcode not implemented"); },
 		RES_0_C: function() { throw new Error("opcode not implemented"); },

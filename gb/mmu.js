@@ -48,21 +48,21 @@ mmu = {
 			}
 			return mmu._rom[addr];
 		} else if(addr < 0xA000) { //vram [0x8000 - 0x9FFF]
-			return gpu._vram[addr & 0x1FFF];
+			return gpu._vram[addr - 0x8000];
 		} else if(addr < 0xC000) { //eram [0xA000 - 0xBFFF]
-			return mmu._eram[addr & 0x1FFF];
+			return mmu._eram[addr - 0xA000];
 		} else if(addr < 0xE000) { //wram [0xC000 - 0xDFFF]
-			return mmu._wram[addr & 0x1FFF];
+			return mmu._wram[addr - 0xC000];
 		} else if(addr < 0xFE00) { //wram mirror [0xE000 - 0xFDFF]
-			return mmu._wram[addr & 0x1FFF];
+			return mmu._wram[addr - 0xE000];
 		} else if(addr < 0xFEA0) { //oam [0xFE00 - 0xFE9F]
-			return gpu._oam[addr & 0x9F];
+			return gpu._oam[addr - 0xFE00];
 		} else if(addr < 0xFF00) { //not usable [0xFEA0 - 0xFEFF]
 			return 0;
 		} else if(addr < 0xFF80) { //hardware registers [0xFF00 - 0xFF7F]
 			
 		} else if(addr < 0xFFFF) { //hram [0xFF80 - 0xFFFE]
-			return mmu._hram[addr & 0x7E];
+			return mmu._hram[addr - 0xFF80];
 		} else if(addr == 0xFFFF) { //interrupts enable [0xFFFF]
 			return mmu._ie;
 		}
@@ -76,21 +76,21 @@ mmu = {
 		if(addr < 0x8000) { //rom [0x0000 - 0x7FFF]
 			// TODO: handle rom write
 		} else if(addr < 0xA000) { //vram [0x8000 - 0x9FFF]
-			gpu._vram[addr & 0x1FFF] = val;
+			gpu._vram[addr - 0x8000] = val;
 		} else if(addr < 0xC000) { //eram [0xA000 - 0xBFFF]
-			mmu._eram[addr & 0x1FFF] = val;
+			mmu._eram[addr - 0xA000] = val;
 		} else if(addr < 0xE000) { //wram [0xC000 - 0xDFFF]
-			mmu._wram[addr & 0x1FFF] = val;
+			mmu._wram[addr - 0xC000] = val;
 		} else if(addr < 0xFE00) { //wram mirror [0xE000 - 0xFDFF]
-			mmu._wram[addr & 0x1FFF] = val;
+			mmu._wram[addr - 0xE000] = val;
 		} else if(addr < 0xFEA0) { //oam [0xFE00 - 0xFE9F]
-			gpu._oam[addr & 0x9F] = val;
+			gpu._oam[addr - 0xFE00] = val;
 		} else if(addr < 0xFF00) { //not usable [0xFEA0 - 0xFEFF]
 			// Do nothing. This area is unusable
 		} else if(addr < 0xFF80) { //hardware registers [0xFF00 - 0xFF7F]
 			
 		} else if(addr < 0xFFFF) { //hram [0xFF80 - 0xFFFE]
-			mmu._hram[addr & 0x7E] = val;
+			mmu._hram[addr - 0xFF80] = val;
 		} else if(addr == 0xFFFF) { //interrupts enable [0xFFFF]
 			mmu._ie = val;
 		}
