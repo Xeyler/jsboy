@@ -5,7 +5,6 @@ gpu = {
 	
 	_vram: [],
 	_oam: [],
-	_gl: [],
 	
 	advanceCycles: function(cyclesAdvanced) {
 		gpu._modeclock += cyclesAdvanced;
@@ -13,7 +12,7 @@ gpu = {
 		switch(gpu._mode) {
 			case 2: // searching OAM
 				if(gpu._modeclock >= 20) {
-					gpu._modeclock = 0;
+					gpu._modeclock = 0; // TODO: Why aren't these -= the corresponding modeclock amount?
 					gpu._mode = 3;
 				}
 				break;
@@ -56,8 +55,9 @@ gpu = {
 	},
 	
 	reset: function() {
-		gpu._gl = document.getElementById('display').getContext('webgl2');
-		gpu._gl.clearColor(0.0, 0.0, 0.0, 1.0);
-		gpu._gl.clear(gpu._gl.COLOR_BUFFER_BIT | gpu._gl.DEPTH_BUFFER_BIT);
+		gpu._vram.length = 0x9FFF - 0x8000 + 1;
+		gpu._vram.fill(0);
+		gpu._oam.length = 0xFE9F - 0xFE00 + 1;
+		gpu._oam.fill(0);
 	}
 };

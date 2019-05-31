@@ -28,8 +28,11 @@ mmu = {
 	
 	reset: function() {
 		mmu._inbootstrap = true;
+		mmu._eram.length = 0xBFFF - 0xA000 + 1;
 		mmu._eram.fill(0);
+		mmu._wram.length = 0xDFFF - 0xC000 + 1;
 		mmu._wram.fill(0);
+		mmu._hram.length = 0xFFFE - 0xFF80 + 1;
 		mmu._hram.fill(0);
 		mmu._ie = 0;
 	},
