@@ -1,7 +1,6 @@
-mmu = {
-	
-	_inbootstrap: true,
-	_bootstrap: [		
+function MMU(gpu) {
+	this._inbootstrap = true;
+	this._bootstrap = [		
 		0x31, 0xfe, 0xff, 0xaf, 0x21, 0xff, 0x9f, 0x32, 0xcb, 0x7c, 0x20, 0xfb, 0x21, 0x26, 0xff, 0x0e,
 		0x11, 0x3e, 0x80, 0x32, 0xe2, 0x0c, 0x3e, 0xf3, 0xe2, 0x32, 0x3e, 0x77, 0x77, 0x3e, 0xfc, 0xe0,
 		0x47, 0x11, 0x04, 0x01, 0x21, 0x10, 0x80, 0x1a, 0xcd, 0x95, 0x00, 0xcd, 0x96, 0x00, 0x13, 0x7b,
@@ -18,46 +17,46 @@ mmu = {
 		0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e, 0x3c, 0x42, 0xb9, 0xa5, 0xb9, 0xa5, 0x42, 0x3c,
 		0x21, 0x04, 0x01, 0x11, 0xa8, 0x00, 0x1a, 0x13, 0xbe, 0x20, 0xfe, 0x23, 0x7d, 0xfe, 0x34, 0x20,
 		0xf5, 0x06, 0x19, 0x78, 0x86, 0x23, 0x05, 0x20, 0xfb, 0x86, 0x20, 0xfe, 0x3e, 0x01, 0xe0, 0x50
-	],
+	];
 
-	_rom: [],
-	_eram: [],
-	_wram: [],
-	_hram: [],
-	_ie: 0,
+	this._rom = [];
+	this._eram = [];
+	this._wram = [];
+	this._hram = [];
+	this._ie = 0;
 	
-	reset: function() {
-		mmu._inbootstrap = true;
-		mmu._eram.length = 0xBFFF - 0xA000 + 1;
-		mmu._eram.fill(0);
-		mmu._wram.length = 0xDFFF - 0xC000 + 1;
-		mmu._wram.fill(0);
-		mmu._hram.length = 0xFFFE - 0xFF80 + 1;
-		mmu._hram.fill(0);
-		mmu._ie = 0;
-	},
+	this.reset = function() {
+		this._inbootstrap = true;
+		this._eram.length = 0xBFFF - 0xA000 + 1;
+		this._eram.fill(0);
+		this._wram.length = 0xDFFF - 0xC000 + 1;
+		this._wram.fill(0);
+		this._hram.length = 0xFFFE - 0xFF80 + 1;
+		this._hram.fill(0);
+		this._ie = 0;
+	};
 	
-	set_rom: function(bytes) {
-		mmu._rom = bytes;
-	},
+	this.set_rom = function(bytes) {
+		this._rom = bytes;
+	};
 	
-	rb: function(addr) {
+	this.rb = function(addr) {
 		addr &= 0xFFFF;
 		if(addr < 0x8000) { //rom [0x0000 - 0x7FFF]
-			if(mmu._inbootstrap) {
+			if(this._inbootstrap) {
 				if(addr < 0x100) 
-					return mmu._bootstrap[addr];
-				else mmu._inbios = 0;
+					return this._bootstrap[addr];
+				else this._inbios = 0;
 			}
-			return mmu._rom[addr];
+			return this._rom[addr];
 		} else if(addr < 0xA000) { //vram [0x8000 - 0x9FFF]
 			return gpu._vram[addr - 0x8000];
 		} else if(addr < 0xC000) { //eram [0xA000 - 0xBFFF]
-			return mmu._eram[addr - 0xA000];
+			return this._eram[addr - 0xA000];
 		} else if(addr < 0xE000) { //wram [0xC000 - 0xDFFF]
-			return mmu._wram[addr - 0xC000];
+			return this._wram[addr - 0xC000];
 		} else if(addr < 0xFE00) { //wram mirror [0xE000 - 0xFDFF]
-			return mmu._wram[addr - 0xE000];
+			return this._wram[addr - 0xE000];
 		} else if(addr < 0xFEA0) { //oam [0xFE00 - 0xFE9F]
 			return gpu._oam[addr - 0xFE00];
 		} else if(addr < 0xFF00) { //not usable [0xFEA0 - 0xFEFF]
@@ -65,27 +64,28 @@ mmu = {
 		} else if(addr < 0xFF80) { //hardware registers [0xFF00 - 0xFF7F]
 			
 		} else if(addr < 0xFFFF) { //hram [0xFF80 - 0xFFFE]
-			return mmu._hram[addr - 0xFF80];
+			return this._hram[addr - 0xFF80];
 		} else if(addr == 0xFFFF) { //interrupts enable [0xFFFF]
-			return mmu._ie;
+			return this._ie;
 		}
-	},
-	rw: function(addr) {
-		return mmu.rb(addr) + (mmu.rb(addr + 1) << 8);
-	},
+	};
+
+	this.rw = function(addr) {
+		return this.rb(addr) + (this.rb(addr + 1) << 8);
+	};
 	
-	wb: function(addr, val) {
+	this.wb = function(addr, val) {
 		addr &= 0xFFFF;
 		if(addr < 0x8000) { //rom [0x0000 - 0x7FFF]
 			// TODO: handle rom write
 		} else if(addr < 0xA000) { //vram [0x8000 - 0x9FFF]
 			gpu._vram[addr - 0x8000] = val;
 		} else if(addr < 0xC000) { //eram [0xA000 - 0xBFFF]
-			mmu._eram[addr - 0xA000] = val;
+			this._eram[addr - 0xA000] = val;
 		} else if(addr < 0xE000) { //wram [0xC000 - 0xDFFF]
-			mmu._wram[addr - 0xC000] = val;
+			this._wram[addr - 0xC000] = val;
 		} else if(addr < 0xFE00) { //wram mirror [0xE000 - 0xFDFF]
-			mmu._wram[addr - 0xE000] = val;
+			this._wram[addr - 0xE000] = val;
 		} else if(addr < 0xFEA0) { //oam [0xFE00 - 0xFE9F]
 			gpu._oam[addr - 0xFE00] = val;
 		} else if(addr < 0xFF00) { //not usable [0xFEA0 - 0xFEFF]
@@ -93,13 +93,14 @@ mmu = {
 		} else if(addr < 0xFF80) { //hardware registers [0xFF00 - 0xFF7F]
 			
 		} else if(addr < 0xFFFF) { //hram [0xFF80 - 0xFFFE]
-			mmu._hram[addr - 0xFF80] = val;
+			this._hram[addr - 0xFF80] = val;
 		} else if(addr == 0xFFFF) { //interrupts enable [0xFFFF]
-			mmu._ie = val;
+			this._ie = val;
 		}
-	},
-	ww: function(addr, val) {
-		mmu.wb(addr, val & 0xFF);
-		mmu.wb(addr + 1, (val >> 8) & 0xFF);
-	}
+	};
+
+	this.ww = function(addr, val) {
+		this.wb(addr, val & 0xFF);
+		this.wb(addr + 1, (val >> 8) & 0xFF);
+	};
 };

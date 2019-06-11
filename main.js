@@ -4,12 +4,13 @@ window.onload = function() {
             console.log("User selected rom file: ", rom_input.files[0]);
             var reader = new FileReader();
             reader.onload = function() {
+                
+                var gb = new Gameboy();
+
                 var file_byte_array = new Uint8Array(this.result);
-                mmu.set_rom(file_byte_array);
-                mmu.reset();
-                gpu.reset();
-                cpu.reset();
-                cpu.run();
+                gb.set_rom(file_byte_array);
+
+                gb.run();
             }
             reader.readAsArrayBuffer(rom_input.files[0]);
         }
